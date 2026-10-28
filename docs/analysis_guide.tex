@@ -1,0 +1,164 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern,microtype}
+\usepackage[margin=21mm,headheight=15pt]{geometry}
+\usepackage{booktabs,array,xcolor,listings,enumitem,fancyhdr,hyperref}
+\definecolor{ink}{HTML}{173A53}
+\definecolor{light}{HTML}{F2F5F7}
+\hypersetup{colorlinks=true,linkcolor=ink,urlcolor=ink,
+ pdftitle={MEG group-to-individual analysis: code guide}}
+\pagestyle{fancy}\fancyhf{}
+\fancyhead[L]{\small\textcolor{ink}{MEG group-to-individual analysis}}
+\fancyhead[R]{\small Code guide}
+\fancyfoot[R]{\small\thepage}
+\setlength{\parindent}{0pt}\setlength{\parskip}{6pt}
+\setlength{\emergencystretch}{2em}
+\setlist{nosep,leftmargin=1.5em}
+\lstset{basicstyle=\ttfamily\small,backgroundcolor=\color{light},
+ frame=single,rulecolor=\color{light},breaklines=true,columns=fullflexible,
+ keepspaces=true,showstringspaces=false,aboveskip=7pt,belowskip=7pt}
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\begin{document}
+\thispagestyle{empty}
+{\Large\bfseries\textcolor{ink}{A guide to the analysis code}}\par
+\vspace{2mm}
+{\large\bfseries From group-level neurophysiological biomarkers to individual-level phenotyping to identify mechanisms of neurodegenerative disease}\par
+\vspace{2mm}
+{\small Amirhossein Jafarian, Laura E. Hughes, Michelle Naessens, Matthew A. Rouse, Thomas E. Cope, Negin Holland, Alexander Murley, Sean Tan Yong Wei, Timothy Rittman, David J. Whiteside, James B. Rowe.}
+
+This guide follows the MATLAB code from resting-state MEG preprocessing to group comparisons and individual assignment. The GitHub README introduces the study through the graphical abstract and group-to-individual morphisms figure.
+
+\section*{Folder structure}
+\begin{tabular}{L{45mm}L{111mm}}\toprule
+Folder & Role\\\midrule
+\code{pre_processing} & Prepare MEG recordings, perform source inversion and extract source time courses.\\
+\code{dcm} & Specify and fit the seven-source cross-spectral DCM.\\
+\code{Feature} & Extract empirical features, plot spectra and compare empirical/DCM features between groups.\\
+\code{probe_classification} & Select compact panels and fit classifiers in leave-one-out analyses.\\\bottomrule
+\end{tabular}
+
+\section*{Before running}
+Open MATLAB in the repository root. Add the four analysis folders and the required external software to the MATLAB path:
+\begin{lstlisting}
+addpath('pre_processing', 'dcm', 'Feature', 'probe_classification');
+\end{lstlisting}
+The scripts use SPM12, OSL, Signal Processing Toolbox, and Statistics and Machine Learning Toolbox. Source inversion also uses \code{spm_eeg_inv_datareg_ui_ek}. At the top of each script, set the data paths, participant selection and relevant analysis settings. The default layout uses \code{data} for inputs and \code{results} for outputs.
+
+Participant metadata are read from \code{data/participants.xlsx}, with a text ID such as \code{Sub0001} in the first column and group in the second. The groups are CON, bvFTD and PSP. Source files are placed in \code{data/sources}; fitted DCMs are saved under \code{results/dcm}. SPM MAT files must retain their companion DAT files.
+
+\section*{Order of use}
+\begin{enumerate}
+\item Preprocess recordings and extract source time courses, if these are not already available.
+\item Extract empirical spectral features and run their group statistics.
+\item Fit participant DCMs and run parameter-wise group statistics.
+\item Run the empirical and DCM classification probes from those reports.
+\end{enumerate}
+Participant-level data are not included. The following pages explain each script and the files passed between stages.
+\clearpage
+
+\section*{1. Preprocessing and source extraction}
+\textbf{Folder:} \code{pre_processing}
+
+\subsection*{MEG preprocessing}
+{\small\path{code_preProcessing.m}}
+
+This script starts from MaxFilter-processed MEG recordings. It converts recordings to the SPM format, downsamples the data, applies frequency filters, marks artefacts and creates epochs for source analysis. The processing includes 500 Hz sampling and one-second epochs.
+
+\textbf{Inputs.} Participant metadata, the BIDS recording folders, MaxFilter output and the required channel-selection file. Set the BIDS paths, channel file and participants at the top of the script. Review the artefact settings and participant cleaning decisions for the dataset being analysed.
+
+\textbf{Outputs.} Preprocessed, epoched SPM MEEG objects in the participant derivative folders. These are the input to source inversion.
+
+\subsection*{Source inversion and time courses}
+{\small\path{DMN_Selina.m}}
+
+This script combines each participant's MEG data with their structural MRI. It builds the anatomical mesh, registers the MEG sensors to the MRI, calculates a single-shell forward model and performs SPM source inversion. It then extracts source time courses from the salience/default-mode network.
+
+\textbf{Inputs.} The preprocessed SPM recording, participant MRI and the source locations specified in the script. Set the data folders, participant list and inversion settings at the top. The study coregistration helper must be on the MATLAB path.
+
+\textbf{Outputs.} Inverted SPM objects and source MAT/DAT files. The seven-source files are used by both the empirical spectral and DCM branches. The source-file pattern used downstream is \path{XX_sub-Sub####_DSALL.mat}; edit the file selector if the local filenames differ.
+
+\section*{2. Dynamic causal modelling}
+\textbf{Folder:} \code{dcm}
+
+{\small\path{DMM_run_me_2025_SNDMN.m}}
+
+The driver loops over participants, loads each source recording and calls its local model function, \code{DCM_CSD_DSALL}. The model uses SPM's cross-spectral DCM, an LFP observation model and a conductance-based \code{CMM_NMDA} neural model. Seven sources are connected through the specified forward and backward connection matrices.
+
+\textbf{Inputs.} Source MAT/DAT files, participant metadata and the selected time window in milliseconds. Set \code{timeWindowMs} as \code{[start end]} and edit the source-file pattern before running. The frequency range and model settings are defined in the same file.
+
+\textbf{Outputs.} One fitted DCM per participant under \code{results/dcm}. The posterior means in \code{DCM.Ep} are used for group statistics and the DCM classification probe.
+\clearpage
+
+\section*{3. Spectral features and group statistics}
+\textbf{Folder:} \code{Feature}
+
+\subsection*{Extract the empirical feature table}
+{\small\path{Extraction_Features_optimised.m}}
+
+The extractor loads source recordings and calculates features for each channel and epoch. Features describe relative delta, theta, alpha, beta and gamma power; delta/alpha and theta/alpha ratios; aperiodic spectral slope; alpha and beta peak frequencies; alpha and beta residual maxima; spectral entropy; median frequency; and alpha-phase/beta-amplitude coupling. Epoch estimates are averaged within each participant.
+
+\textbf{Inputs.} The participant workbook and source MAT/DAT files. Set \code{excelPath}, \code{matFolder} and the feature settings near the beginning. The default sampling rate is 500 Hz and feature PSD range is 1--45 Hz.
+
+\textbf{Outputs.} The feature workbook and MAT companion are saved under \code{results/features}. The \code{Features} sheet contains participant ID, group and numeric feature columns.
+
+\subsection*{Plot group spectra}
+{\small\path{GrandAverage_LogPSD_Overlay_withStats.m}}
+
+This script computes epoch-level Welch PSD, averages log spectra within participant and then across each group, and plots the group mean with between-participant variability. Pairwise Welch tests identify frequency bins for the plot markers.
+
+\textbf{Inputs.} The participant workbook and the same source files. Set the display frequency range, channel labels and plot options at the top. \textbf{Outputs.} Spectral overlays and frequency-wise statistical summaries under \code{results/psd_overlays}.
+
+\subsection*{Compare empirical features between groups}
+{\small\path{Stats_Report_From_Features.m}}
+
+The script reads the saved feature table and runs four group contrasts. For each feature, it calculates a Welch two-sample test, the group means and sample sizes, Cohen's $d$, Hedges' $g$ and Benjamini-Hochberg FDR q-values. It also creates summary plots and a ranked top-hits sheet.
+
+\textbf{Input.} The feature workbook. \textbf{Outputs.} \path{Feature_Statistics_Report_AllComparisons.xlsx}, its MAT summary and plots under \code{results/feature_statistics}. This report supplies the empirical panel rankings.
+
+\subsection*{Compare DCM parameters between groups}
+{\small\path{STAT_FIRST_LEVEL_DCM_between_groups.m}}
+
+The script loads fitted DCMs, vectorises \code{DCM.Ep} and compares each parameter across the four contrasts. It reports parameter names, Welch tests, standardised effects and multiple-comparison results.
+
+\textbf{Inputs.} The participant workbook and fitted DCM folder. \textbf{Outputs.} One comparison workbook per contrast under \code{results/dcm_statistics}. These reports supply the DCM panel rankings.
+\clearpage
+
+\section*{4. Group-to-individual classification probes}
+\textbf{Folder:} \code{probe_classification}
+
+\subsection*{Empirical feature probe}
+{\small\path{CLASSIFY_FEATURE_TABLE_FROM_STATS_REPORT_LOO.m}}
+
+This function reads the participant feature workbook and its group-statistics report. It matches the ranked features to the feature-table columns, constructs the panels below and fits each classifier using leave-one-out fitting.
+
+\textbf{Inputs.} The empirical feature workbook and group-statistics report described on the previous page. The comparison sheets and the top-hits sheet are used for panel construction. \textbf{Outputs.} Panel membership, participant predictions, scores and performance summaries under \code{results/psd_probe}.
+
+\subsection*{DCM parameter probe}
+{\small\path{CLASSIFY_ALL_DCM_REPORTS_LOO.m}}
+
+This function reads the DCM comparison workbooks, selects parameter panels and extracts the corresponding values from each participant's \code{DCM.Ep}. It applies the same classifier families and saves the participant-level assignments.
+
+\textbf{Inputs.} Participant metadata, fitted DCMs and the DCM statistics folder. \textbf{Outputs.} Panel membership, predictions, performance summaries and optional plots under \code{results/dcm_probe}.
+
+\subsection*{Feature panels and decision functions}
+Each ranking is used at sizes of five and ten features:
+\begin{center}\small
+\begin{tabular}{L{30mm}L{124mm}}\toprule
+Panel & Selection rule\\\midrule
+P5 / P10 & Smallest uncorrected p-values.\\
+D5 / D10 & Largest absolute Cohen's $d$ values.\\
+C5 / C10 & Sum of standardised evidence, $z(-\log_{10}p)$, and effect size, $z(|d|)$.\\
+S5 / S10 & Combined score plus a recurrence bonus across contrasts.\\\bottomrule
+\end{tabular}
+\end{center}
+
+Linear SVM, RBF-SVM, a bagged-tree ensemble and AdaBoost provide complementary decision maps from panel values to assignment. SVM predictors are scaled using the training participants in each fold. Participants with missing selected features are omitted for the relevant panel.
+
+Panels are constructed from the full-sample group statistics and remain fixed while each participant is excluded from fitting the classifier. The results therefore describe individual assignment within the selected group-defined representation.
+
+\subsection*{Reading the outputs}
+The summary workbooks contain accuracy, sensitivity, specificity, precision, F1, Matthews correlation coefficient (MCC), and ROC area (AUC). Participant tables link IDs to their group, predicted label and decision score. Read the group labels saved with each comparison when interpreting sensitivity and specificity. Use the panel-membership tables to identify which physiological features contributed to each probe.
+
+\end{document}
