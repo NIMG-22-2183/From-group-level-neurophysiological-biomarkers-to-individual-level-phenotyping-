@@ -35,7 +35,7 @@ The [code guide](docs/analysis_guide.pdf) explains each script, its inputs and o
 
 ## Running the analysis
 
-Use MATLAB with SPM12, OSL, Signal Processing Toolbox, and Statistics and Machine Learning Toolbox. Source inversion also uses the study helper `spm_eeg_inv_datareg_ui_ek`. Open MATLAB in the repository root and add the analysis folders:
+Use MATLAB with SPM12, OSL, Signal Processing Toolbox, and Statistics and Machine Learning Toolbox.  Open MATLAB in the repository root and add the analysis folders:
 
 ```matlab
 addpath('pre_processing', 'dcm', 'Feature', 'probe_classification');
